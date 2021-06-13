@@ -31,6 +31,7 @@ mem:
 
 .PHONY: clean
 clean:
+	-sudo umount mnt
 	-rm -rf $(MOUNT_DIR)
 	-rm -rf target
 	-rm -rf $(DISK_IMG)
