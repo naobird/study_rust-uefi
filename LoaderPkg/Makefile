@@ -23,15 +23,17 @@ build:
 run: 
 	$(RUN)
 
-.PHONY: mem
-mem: 
-	$(BUILD)
+.PHONY: mount
+mount: 
 	-sudo mount -o loop $(DISK_IMG) $(MOUNT_DIR)
 	-ls mnt
 
+.PHONY: umount
+umount: 
+	-sudo umount $(MOUNT_DIR)
+
 .PHONY: clean
 clean:
-	-sudo umount mnt
 	-rm -rf $(MOUNT_DIR)
 	-rm -rf target
 	-rm -rf $(DISK_IMG)
