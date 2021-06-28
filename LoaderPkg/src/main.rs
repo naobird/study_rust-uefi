@@ -1,3 +1,6 @@
+/*
+ * main.rs
+ */
 #![feature(abi_efiapi)]
 #![no_std]
 #![no_main]
@@ -15,40 +18,52 @@ fn panic(_info: &PanicInfo) -> ! {
     loop {}
 }
 
+pub struct RegularFileWriter<'a>(&'a mut RegularFile);
+impl<'a> RegularFileWriter<'a> {
+    pub unsafe fn new(regular_file : &'a mut RegularFile) -> Self {
+        Self(regular_file)
+    }
+}
+impl<'a> core::fmt::Write for RegularFileWriter<'a> {
+    fn write_str(&mut self, s: &str) -> core::fmt::Result {
+        self.0.write(s.as_bytes()).map_err(|_| core::fmt::Error)?.unwrap();
+        Ok(())
+    }
+}
+
 pub struct MemoryMap<T> {
     map_size : usize,
     memory_map_key : MemoryMapKey,
     descriptor_iter : T,
 }
 
-impl<T> MemoryMap<T> {
-    pub fn GetMemoryMap<S>(map_size : usize, memory_map_info : (MemoryMapKey, T)) -> MemoryMap<T> 
-        where T: ExactSizeIterator<Item = S> + Clone
-    {
-        return MemoryMap {
-            map_size : map_size,
-            memory_map_key : memory_map_info.0,
-            descriptor_iter : memory_map_info.1,
-        };
-    } 
+impl<'a, T> MemoryMap<T> {
+    pub fn GetMemoryMap(map_size : usize, memory_map_info : (MemoryMapKey, T)) -> MemoryMap<T> 
+        where T: ExactSizeIterator<Item = &'a MemoryDescriptor> + Clone
+        {
+            return MemoryMap {
+                map_size : map_size,
+                memory_map_key : memory_map_info.0,
+                descriptor_iter : memory_map_info.1,
+            };
+        } 
 
-    pub fn SaveMemoryMap<S>(&self, memmap_file : &mut RegularFile) -> uefi::Status 
-        where T: ExactSizeIterator<Item = S> + Clone
-    { 
-        // save memory map to the target file
-        let header : &[u8] = "Index, Type, Type(name), PhysicalStart, NumberOfPages, Attribute\n".as_bytes();
-        memmap_file.write(header).unwrap_success();
+    pub fn SaveMemoryMap(&self, memmap_file_writer : &mut RegularFileWriter) -> uefi::Status 
+        where T: ExactSizeIterator<Item = &'a MemoryDescriptor> + Clone
+        { 
+            // save memory map to the target file
+            writeln!(memmap_file_writer, "Index, Type, Type(name), PhysicalStart, NumberOfPages, Attribute").unwrap();
 
-        // dump each memory info.
-        let iter = self.descriptor_iter.clone();
-        for descriptor in iter {
-            memmap_file.write(header).unwrap_success();
-            // TODO
+            // dump each memory info.
+            let iter = self.descriptor_iter.clone();
+            let mem_index : u32 = 0;
+            for (i, desc) in iter.enumerate() {
+                writeln!(memmap_file_writer, "{}, {:x}, {:?}, {:08x}, {}, {:x}", 
+                         i, desc.ty.0, desc.ty, desc.phys_start, desc.page_count, desc.att).unwrap();
+            }
+            memmap_file_writer.0.flush().unwrap_success();
+            return uefi::Status::SUCCESS;
         }
-
-        memmap_file.flush().unwrap_success();
-        return uefi::Status::SUCCESS;
-    }
 }
 
 #[entry]
@@ -74,10 +89,12 @@ fn efi_main(handle: Handle, system_table: SystemTable<Boot>) -> Status {
     // open the target file
     let memmap_file_handle : FileHandle = root_dir.open("\\memmap", FileMode::CreateReadWrite, FileAttribute::empty()).unwrap_success();
     let mut memmap_file : RegularFile;
+    let mut memmap_file_writer : RegularFileWriter;
     unsafe {
         memmap_file = RegularFile::new(memmap_file_handle);
+        memmap_file_writer = RegularFileWriter::new(&mut memmap_file);
     }
-    memory_map.SaveMemoryMap(&mut memmap_file);
+    memory_map.SaveMemoryMap(&mut memmap_file_writer);
 
     writeln!(system_table.stdout(), "Hello, world!").unwrap();
 
